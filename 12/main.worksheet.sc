@@ -1,81 +1,73 @@
 import scala.io.Source
 
-case class Position(height: Int, char: Char, row: Int, col: Int):
-  lazy val isStart = char == 'S'
-  lazy val isEnd = char == 'E'
+type HeightFilter = Function2[Int, Int, Boolean]
 
+case class Position(char: Char, row: Int, col: Int):
+  lazy val height = Position.heightMap(char)
   lazy val neighbors =
     List((row + 1, col), (row, col + 1), (row - 1, col), (row, col - 1))
 
-  def getMoves(grid: Seq[Seq[Position]], hist: Seq[Position]) =
-    neighbors.collect {
-      case (row, col) => grid.lift(row).flatMap(_.lift(col))
-    }.flatten.filter {
-      case Position(newHeight, _, _, _) if newHeight - height >= 2 => false
-      case pos @ _:Position if hist.exists(p => p == pos) => false
-      case _ => true
+  def getMoves(grid: Seq[Seq[Position]], moveFn: HeightFilter) =
+    neighbors.flatMap { (row, col) =>
+      grid.lift(row).flatMap(_.lift(col)).filter(p => moveFn(height, p.height))
     }
 
 object Position:
   lazy val heightMap: Map[Char, Int] =
-    val alphabet = "abcdefghijklmnopqrstuvwxyz"
-    s"${alphabet}SE".zipWithIndex.map {
+    s"abcdefghijklmnopqrstuvwxyzSE".zipWithIndex.map {
       case ('S', _) => ('S', 1)
       case ('E', _) => ('E', 26)
       case (char, i) => (char, i + 1)
     }.toMap
 
-  def apply(char: Char, row: Int, col: Int) =
-    new Position(heightMap(char), char, row, col)
-
-case class Move(pos: Position, nextMoves: Seq[Move]):
-  def minMovesLeft(current: Int = 1): Int =
-    if pos.isEnd then return current
-    if nextMoves.isEmpty then return -1
-    val posNextMoves = nextMoves.map(_.minMovesLeft(current + 1)).filter(_ > 0)
-    if posNextMoves.isEmpty then return -1 else posNextMoves.min
-
-case class MapGrid(grid: Vector[Vector[Position]]):
-  def findPosition(f: Position => Boolean) =
-    val coords = for {
-      (row, i) <- grid.zipWithIndex
-      (pos, j) <- row.zipWithIndex if f(pos)
-    } yield pos
-    coords(0)
-
-  lazy val start = findPosition(_.isStart)
-  lazy val end = findPosition(_.isEnd)
-
-  def row(index: Int) = grid(index)
-  def col(index: Int) = grid.map(_(index))
-
-  def playMove(pos: Position, history: Seq[Position] = Seq()): Seq[Move] =
-    val nextMoves = pos.getMoves(this.grid, history)
-    if nextMoves.isEmpty || pos == end then return Seq()
-    nextMoves.map { pos => Move(pos, playMove(pos, history :+ pos)) }
-
-  def play() =
-    val moveTree = playMove(start)
-    moveTree.map(m => m.minMovesLeft())
-
-object MapGrid:
-  def apply(lines: Seq[String]) = new MapGrid(
-    lines.zipWithIndex.map {
-      (line, i) => line.zipWithIndex.map {
-        (char, j) => Position(char, i, j)
-      }.toVector
-    }.toVector
+enum Direction(
+  val start: Position => Boolean,
+  val end: Position => Boolean,
+  val moveFn: HeightFilter
+):
+  case Regular extends Direction(
+    p => p.char == 'S',
+    p => p.char == 'E',
+    (height, newHeight) => newHeight - height <= 1
+  )
+  case Reverse extends Direction(
+    p => p.char == 'E',
+    p => p.height == 1,
+    (height, newHeight) => newHeight - height >= -1
   )
 
+case class Move(position: Position, count: Int)
+
+case class MapGrid(grid: Seq[Seq[Position]], direction: Direction):
+  def findPosition(f: Position => Boolean) =
+    grid.flatMap { row => row.find(pos => f(pos)) }(0)
+
+  lazy val start = findPosition(direction.start)
+
+  def minMoves(moves: List[Move], visited: Set[Position] = Set()): Int =
+    val Move(pos, count) = moves.head
+    if direction.end(pos) then return count
+    visited(pos) match
+      case true => minMoves(moves.tail, visited)
+      case false =>
+        val nextMoves = pos.getMoves(this.grid, direction.moveFn)
+          .filterNot(visited(_))
+        minMoves(moves.tail ++ nextMoves.map(Move(_, count + 1)), visited + pos)
+
+  def play() = minMoves(List(Move(start, 0)))
+
 object HillClimbing:
-  def one() = common()
-  def two() = common()
+  def one() = common(Direction.Regular)
+  def two() = common(Direction.Reverse)
 
-  def common() =
-    val lines = Source.fromFile("12/example.txt").getLines.toList
-    val map = MapGrid(lines)
-    // map.play()
-
+  def common(direction: Direction) =
+    val lines = Source.fromFile("12/input.txt").getLines.toList
+    val map = new MapGrid(
+      for (line, i) <- lines.zipWithIndex yield for (char, j) <- line.zipWithIndex
+        yield Position(char, i, j),
+      direction
+    )
+    map.play()
 
 HillClimbing.one()
 HillClimbing.two()
