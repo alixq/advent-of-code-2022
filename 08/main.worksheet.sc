@@ -21,7 +21,7 @@ case class Tree(height: Int, row: Int, col: Int, grid: Grid):
     }.product
 
 case class Grid(val rows: Int, val cols: Int):
-  var trees: Seq[Seq[Tree]] | Null = null
+  var trees: Seq[Seq[Tree]] | Null = Seq[Seq[Tree]]()
 
   def fill(lines: Seq[String]) =
     trees = for (line, i) <- lines.zipWithIndex yield {
